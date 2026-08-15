@@ -11,15 +11,17 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { getDb, getFirebase } from "./firebase";
 import type {
   BlogDoc,
   EnquiryDoc,
+  MemberDoc,
   ProgramDoc,
   SiteSettings,
   VideoDoc,
 } from "./cms-types";
+
 
 export type CollectionName = "programs" | "members" | "blogs" | "videos" | "enquiries";
 
