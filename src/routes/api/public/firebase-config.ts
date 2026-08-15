@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/public/firebase-config")({
   server: {
     handlers: {
       GET: () => {
-        const apiKey = (process.env["GOOGLE_API_KEY"] ?? "").trim();
+        const apiKey = "AIzaSyA_68xftxR1YAx8BxRNliP7Nr3m1gGP-Rc";
         return new Response(
           JSON.stringify({
             apiKey,
