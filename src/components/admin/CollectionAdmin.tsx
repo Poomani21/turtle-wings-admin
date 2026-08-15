@@ -155,29 +155,14 @@ export function CollectionAdmin({
                       {field.help ?? "Enabled"}
                     </label>
                   ) : field.type === "upload" ? (
-                    <div className="space-y-2">
-                      <input
-                        id={id}
-                        type="file"
-                        accept={field.accept ?? "image/*"}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) void onUpload(field, file);
-                        }}
-                        className="w-full text-sm"
-                      />
-                      <input
-                        value={String(value ?? "")}
-                        onChange={(e) => set(field.name, e.target.value)}
-                        placeholder="https://…"
-                        className={inputClass}
-                      />
-                      {uploading === field.name ? (
-                        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Loader2 aria-hidden="true" className="size-3.5 animate-spin" /> Uploading…
-                        </p>
-                      ) : null}
-                    </div>
+                    <MediaUpload
+                      id={id}
+                      value={String(value ?? "")}
+                      accept={field.accept ?? "image/*"}
+                      folder={field.folder ?? name}
+                      onChange={(url) => set(field.name, url)}
+                    />
+
                   ) : field.type === "list" ? (
                     <textarea
                       id={id}
