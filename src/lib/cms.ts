@@ -11,15 +11,17 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { getDb, getFirebase } from "./firebase";
 import type {
   BlogDoc,
   EnquiryDoc,
+  MemberDoc,
   ProgramDoc,
   SiteSettings,
   VideoDoc,
 } from "./cms-types";
+
 
 export type CollectionName = "programs" | "members" | "blogs" | "videos" | "enquiries";
 
@@ -50,13 +52,24 @@ export async function fetchActivePrograms(): Promise<ProgramDoc[]> {
 
 export async function fetchPublishedBlogs(): Promise<BlogDoc[]> {
   const rows = await readAll<BlogDoc>("blogs", ["isPublished", true]);
-  return rows.sort((a, b) => (b.publishedDate ?? "").localeCompare(a.publishedDate ?? ""));
+  return rows.sort((a, b) =>
+    (b.publishedDate ?? b.createdAt ?? "").localeCompare(a.publishedDate ?? a.createdAt ?? ""),
+  );
 }
 
 export async function fetchPublishedVideos(): Promise<VideoDoc[]> {
   const rows = await readAll<VideoDoc>("videos", ["isPublished", true]);
   return rows.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
+
+/** Members explicitly marked public by an administrator. Never returns private records. */
+export async function fetchPublicMembers(): Promise<MemberDoc[]> {
+  const rows = await readAll<MemberDoc>("members", ["isPublic", true]);
+  return rows
+    .filter((m) => m.isPublic)
+    .sort((a, b) => (a.joinedDate ?? "").localeCompare(b.joinedDate ?? "") || a.name.localeCompare(b.name));
+}
+
 
 /**
  * Admin allowlist check: the signed-in UID must have an `admins/{uid}` doc.
@@ -128,11 +141,66 @@ export async function saveSiteSettings(data: SiteSettings): Promise<void> {
   await setDoc(doc(db, "settings", "site"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
 }
 
-/** Uploads to Firebase Storage and returns the public download URL. */
-export async function uploadFile(folder: string, file: File): Promise<string> {
-  const { storage } = await getFirebase();
-  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-  const path = `${folder}/${Date.now()}-${safe}`;
-  const snap = await uploadBytes(ref(storage, path), file);
-  return getDownloadURL(snap.ref);
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB
+export const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // 200 MB
+
+const legacyFolders = new Set(["blogs", "videos", "programs", "members"]);
+
+/**
+ * Storage folder for a media field, e.g. ("blogs", video) -> "videos/blog".
+ * Existing short folder names ("blogs") keep working for legacy records.
+ */
+export function storageFolder(folder: string, file: File): string {
+  if (folder.includes("/")) return folder;
+  const kind = file.type.startsWith("video/") ? "videos" : "images";
+  if (!legacyFolders.has(folder)) return `${kind}/general`;
+  const leaf = folder === "blogs" ? "blog" : folder;
+  return `${kind}/${leaf}`;
 }
+
+function humanSize(bytes: number) {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+/** Validates type + size. Throws a readable message when the file is rejected. */
+export function validateUpload(file: File, accept?: string): void {
+  const isVideo = file.type.startsWith("video/");
+  const isImage = file.type.startsWith("image/");
+  if (accept?.startsWith("video") && !isVideo) throw new Error("Please choose a video file.");
+  if (accept?.startsWith("image") && !isImage) throw new Error("Please choose an image file.");
+  if (!isVideo && !isImage) throw new Error("Only image and video files can be uploaded.");
+  const limit = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
+  if (file.size > limit) {
+    throw new Error(
+      `This file is ${humanSize(file.size)}. Please choose a file under ${humanSize(limit)}.`,
+    );
+  }
+}
+
+/**
+ * Uploads to Firebase Storage and returns the public download URL.
+ * `onProgress` receives 0–100 while the file transfers.
+ */
+export async function uploadFile(
+  folder: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<string> {
+  const { storage } = await getFirebase();
+  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-80);
+  const path = `${storageFolder(folder, file)}/${Date.now()}-${safe}`;
+  const task = uploadBytesResumable(ref(storage, path), file, { contentType: file.type });
+  await new Promise<void>((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snap) =>
+        onProgress?.(
+          snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0,
+        ),
+      (error) => reject(new Error(error.message || "Upload failed. Please try again.")),
+      () => resolve(),
+    );
+  });
+  return getDownloadURL(task.snapshot.ref);
+}
+
