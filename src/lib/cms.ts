@@ -52,13 +52,24 @@ export async function fetchActivePrograms(): Promise<ProgramDoc[]> {
 
 export async function fetchPublishedBlogs(): Promise<BlogDoc[]> {
   const rows = await readAll<BlogDoc>("blogs", ["isPublished", true]);
-  return rows.sort((a, b) => (b.publishedDate ?? "").localeCompare(a.publishedDate ?? ""));
+  return rows.sort((a, b) =>
+    (b.publishedDate ?? b.createdAt ?? "").localeCompare(a.publishedDate ?? a.createdAt ?? ""),
+  );
 }
 
 export async function fetchPublishedVideos(): Promise<VideoDoc[]> {
   const rows = await readAll<VideoDoc>("videos", ["isPublished", true]);
   return rows.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
+
+/** Members explicitly marked public by an administrator. Never returns private records. */
+export async function fetchPublicMembers(): Promise<MemberDoc[]> {
+  const rows = await readAll<MemberDoc>("members", ["isPublic", true]);
+  return rows
+    .filter((m) => m.isPublic)
+    .sort((a, b) => (a.joinedDate ?? "").localeCompare(b.joinedDate ?? "") || a.name.localeCompare(b.name));
+}
+
 
 /**
  * Admin allowlist check: the signed-in UID must have an `admins/{uid}` doc.
